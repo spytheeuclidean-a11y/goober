@@ -102,7 +102,7 @@ async def on_message(msg):
     if msg.author == bot.user or not msg.guild: return
     gid, up = str(msg.guild.id), False
     st, sm = get_set(gid), get_mem(gid)
-    if msg.content == "!learn": 
+    if msg.content.startsWith("learn"):
         response = get_openai_response(" ".join(random.sample(list(words) + list(emojis) + list(media), random.randint(1, 10))) + " " + msg.content)
         msg.reply(response.choices[0].message.content if response and response.choices else "goober")
     if not msg.content.startswith("!"):
