@@ -2,8 +2,7 @@ import discord, random, re, json, os, time, asyncio, threading, itertools, urlli
 from discord.ext import commands
 from flask import Flask, request, render_template_string, session, redirect, Response, jsonify
 from dotenv import load_dotenv
-from openai import OpenAI
-####euclid80tr####
+
 try: from PIL import Image, ImageDraw, ImageFont; image_libs = True
 except ImportError: image_libs = False
 
@@ -26,38 +25,6 @@ def update_status_cycle():
     global status_cycle
     if statuses: status_cycle = itertools.cycle(statuses)
 update_status_cycle()
-
-#client = OpenAI(
- #   api_key = os.environ["NAGA_API_KEY"],
-  #  base_url = "https://api.naga.ac/v1",
-#)
-
-#def get_openai_response(prompt):
- #   response = client.chat.completions.create(
-  #      model="nemotron-3-ultra-550b-a55b:free",
-   #     messages = [
-    #        {
-     #           "role": "system",
-      #          "content": "USER OROSPU COCUGU",
-       #     },
-        #    {
-         #       "role": "user",
-          #      "content": prompt,
-           # }
-        #
-       # ],
-        #temperature=0.2,
-        #max_completion_tokens=1024,
-    #)
-    #return response
-
-
-
-         ###yazcan kodu sikm!!
-        
-         
- 
-       
 
 def save():
     try:
@@ -102,9 +69,7 @@ async def on_message(msg):
     if msg.author == bot.user or not msg.guild: return
     gid, up = str(msg.guild.id), False
     st, sm = get_set(gid), get_mem(gid)
-   # if msg.content.startsWith("learn"):
-    #    response = get_openai_response(" ".join(random.sample(list(words) + list(emojis) + list(media), random.randint(1, 10))) + " " + msg.content)
-     #   msg.reply(response.choices[0].message.content if response and response.choices else "goober")
+
     if not msg.content.startswith("!"):
         if st.get("media"):
             urls = [a.url for a in msg.attachments if a.content_type and any(x in a.content_type for x in ['image','gif'])] + [w for w in msg.content.split() if re.match(r'https?://\S+', w) and any(x in w.lower() for x in ['.gif','.png','.jpg','.jpeg','.webp','tenor.com'])]
@@ -506,4 +471,4 @@ def api_route(action):
 
 if __name__ == "__main__":
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000))), daemon=True).start()
-    bot.run(os.getenv("DISCORD_TOKEN", "")) 
+    bot.run(os.getenv("DISCORD_TOKEN", ""))
