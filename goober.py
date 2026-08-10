@@ -58,13 +58,6 @@ def get_pool(scope, cat_name, gid, global_set):
 @bot.event
 async def on_ready():
     print(f"Online as: {bot.user.name}")
-    webhook_url = os.getenv("UPDATE_WEBHOOK_URL")
-    if webhook_url:
-        try:
-            requests.post(webhook_url, json={"content": "Goober has successfully updated and restarted online."}, timeout=5)
-        except Exception:
-            pass
-
     async def rot():
         while not bot.is_closed():
             if statuses: await bot.change_presence(activity=discord.Game(next(status_cycle)))
@@ -98,6 +91,28 @@ async def on_message(msg):
 
     process_message_content(msg, gid)
 
+    if msg.content.startswith("!cgoobdate"):
+        if not msg.author.guild_permissions.administrator:
+            return await msg.channel.send("You need administrator permissions to use this command.")
+        
+        notes = msg.content[len("!cgoobdate"):].strip()
+        if not notes:
+            return await msg.channel.send("Please provide update notes after the command. Example: `!cgoobdate Bug fixes applied.`")
+        
+        embed = discord.Embed(title="Goober System Update", description=notes, color=0x89b4fa)
+        embed.set_footer(text=f"Triggered by {msg.author.name}")
+        
+        webhook_url = os.getenv("UPDATE_WEBHOOK_URL")
+        if webhook_url:
+            try:
+                requests.post(webhook_url, json={"embeds": [embed.to_dict()]}, timeout=5)
+                await msg.channel.send("Update notes successfully broadcasted to webhook.")
+            except Exception as e:
+                await msg.channel.send(f"Failed to post to webhook: {e}")
+        else:
+            await msg.channel.send(embed=embed)
+        return
+
     trig = bot.user in msg.mentions or "goober" in msg.content.lower() or (msg.reference and msg.reference.resolved and msg.reference.resolved.author == bot.user)
     if trig:
         uid = str(msg.author.id)
@@ -128,7 +143,8 @@ async def ghelp(ctx):
     embed.add_field(name="!wipe_memory", value="Completely deletes all learned data across the bot brain (Admin).", inline=False)
     embed.add_field(name="!clear_mem [words/emojis/media]", value="Clears a specific memory category for this server (Admin).", inline=False)
     embed.add_field(name="!set_chance [1-100]", value="Changes the bot response probability percentage for this server (Admin).", inline=False)
-    embed.add_field(name="Dashboard Features", value="Memory Injector, Cross-Server Dictionaries, Broadcast Messaging, System Health Monitor, Leaderboards, Repository Pull Button, and Custom Statuses are fully controllable via the web dashboard.", inline=False)
+    embed.add_field(name="!cgoobdate [notes]", value="Broadcasts update notes as a dedicated embed (Admin).", inline=False)
+    embed.add_field(name="Dashboard Features", value="Memory Injector, Cross-Server Dictionaries, Broadcast Messaging, System Health Monitor, Leaderboards, Repository Pull Button with Notes, and Custom Statuses are fully controllable via the web dashboard.", inline=False)
     await ctx.send(embed=embed)
 
 @bot.command()
@@ -238,8 +254,48 @@ select.scope-select {background:var(--o); color:#111; padding:6px; width:auto; m
 </style>
 <script>
 function T(n,b){document.querySelectorAll('.tc').forEach(x=>x.classList.remove('act'));document.querySelectorAll('.tb').forEach(x=>x.classList.remove('act'));document.getElementById(n).classList.add('act');b.classList.add('act');localStorage.setItem('gT',n)}
-document.addEventListener("DOMContentLoaded",()=>{let s=localStorage.getItem('gT')||'d';let btn=document.querySelector(`[data-t="${s}"]`)||document.querySelector('.tb');if(btn)T(s,btn)});
+document.addEventListener("DOMContentLoaded",()=>{
+    let s=localStorage.getItem('gT')||'d';
+    let btn=document.querySelector(`[data-t="${s}"]`)||document.querySelector('.tb');
+    if(btn)T(s,btn);
+    updateChannels('b-server', 'b-chan');
+    updateChannels('h-server', 'h-chan');
+});
 async function A(u,b={}){let r=await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});let j=await r.json();if(j.ok)location.reload();else alert(j.msg||"Action failed");}
+function updateChannels(serverSelectId, channelSelectId) {
+    let sSel = document.getElementById(serverSelectId);
+    let cSel = document.getElementById(channelSelectId);
+    let chosenGuild = sSel.value;
+    for (let option of cSel.options) {
+        if (option.getAttribute('data-guild') === chosenGuild) {
+            option.style.display = 'block';
+        } else {
+            option.style.display = 'none';
+        }
+    }
+    let firstVisible = Array.from(cSel.options).find(o => o.getAttribute('data-guild') === chosenGuild);
+    if (firstVisible) {
+        cSel.value = firstVisible.value;
+    }
+}
+async function pullUpdate() {
+    let notes = prompt("Enter update notes:");
+    if (notes === null) return; // User cancelled
+    notes = notes.trim();
+    
+    let r = await fetch('/pull_update', {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({notes: notes})
+    });
+    let j = await r.json();
+    if(j.ok) {
+        alert("Update pulled successfully! Restarting server...");
+        location.reload();
+    } else {
+        alert(j.msg || "Update failed");
+    }
+}
 new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getElementById("u").innerText=d.u;document.getElementById("cp").style.width=d.c+'%';document.getElementById("rm").style.width=d.r+'%';};
 </script></head><body>
 <div class="header-bar">
@@ -276,7 +332,7 @@ new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getEl
     <div class="card">
         <h3>Repository Update Control</h3>
         <p style="font-size:12px;color:#9399b2;margin-top:0">Instantly fetch the latest code from GitHub and restart the server instance.</p>
-        <button class="btn" onclick="if(confirm('Pull latest update from repository and restart?')) A('/pull_update')" style="background:var(--a);color:#111;width:100%;padding:10px">Update from Repository</button>
+        <button class="btn" onclick="pullUpdate()" style="background:var(--a);color:#111;width:100%;padding:10px">Update from Repository</button>
     </div>
     <div class="card">
         <h3>Danger Zone Controls</h3>
@@ -305,10 +361,17 @@ new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getEl
     <div class="card">
         <h3>Advanced Broadcast Message</h3>
         <form action="/send" method="post" enctype="multipart/form-data">
+            <label style="font-size:12px;color:#9399b2">Target Server</label>
+            <select id="b-server" onchange="updateChannels('b-server', 'b-chan')">
+                {% for g in guilds %}
+                    <option value="{{g.id}}">{{g.name}}</option>
+                {% endfor %}
+            </select>
+
             <label style="font-size:12px;color:#9399b2">Target Channel</label>
-            <select name="cid">
+            <select name="cid" id="b-chan">
                 {% for c in channels %}
-                    <option value="{{c.id}}">{{c.guild} &rarr; #{{c.name}}</option>
+                    <option value="{{c.id}}" data-guild="{{c.guild_id}}">#{{c.name}}</option>
                 {% endfor %}
             </select>
             
@@ -378,10 +441,15 @@ new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getEl
     <div class="card">
         <h3>Read Chat History (Backfill)</h3>
         <p style="font-size:12px;color:#9399b2;margin-top:0">Scan past messages in any channel to pull words, emojis, and media into memory.</p>
-        <div class="grid-form">
+        <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:center;">
+            <select id="h-server" onchange="updateChannels('h-server', 'h-chan')" style="margin:0">
+                {% for g in guilds %}
+                    <option value="{{g.id}}">{{g.name}}</option>
+                {% endfor %}
+            </select>
             <select id="h-chan" style="margin:0">
                 {% for c in channels %}
-                    <option value="{{c.id}}">{{c.guild} &rarr; #{{c.name}}</option>
+                    <option value="{{c.id}}" data-guild="{{c.guild_id}}">#{{c.name}}</option>
                 {% endfor %}
             </select>
             <input type="number" id="h-lim" value="100" min="1" max="1000" style="width:80px;margin:0" placeholder="Limit">
@@ -430,7 +498,7 @@ new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getEl
         <h3>Learned Words ({{w_cnt}})</h3>
         <div style="max-height:220px;overflow-y:auto;padding-right:4px">
             {% for w in word_list %}
-                <span class="chip">{{w} <button class="btn" onclick="A('/del_item',{type:'word',val:'{{w}}'})" style="background:var(--r);padding:2px 6px;font-size:10px;color:#fff">✕</button></span>
+                <span class="chip">{{w}} <button class="btn" onclick="A('/del_item',{type:'word',val:'{{w}}'})" style="background:var(--r);padding:2px 6px;font-size:10px;color:#fff">✕</button></span>
             {% endfor %}
         </div>
     </div>
@@ -458,7 +526,9 @@ def logout():
 def home():
     if not session.get("auth"): 
         return redirect("/login")
-    return render_template_string(HTML, channels=[{"id":c.id,"name":c.name,"guild":g.name} for g in bot.guilds for c in g.text_channels], guilds=[{"id":str(g.id),"name":g.name,"st":get_set(g.id)} for g in bot.guilds], leaderboard=sorted(user_stats.values(), key=lambda x:x["count"], reverse=True)[:10], w_cnt=len(words), word_list=list(words), media_list=list(media), status_list=statuses)
+    channels_data = [{"id": c.id, "name": c.name, "guild_id": str(g.id), "guild": g.name} for g in bot.guilds for c in g.text_channels]
+    guilds_data = [{"id": str(g.id), "name": g.name, "st": get_set(g.id)} for g in bot.guilds]
+    return render_template_string(HTML, channels=channels_data, guilds=guilds_data, leaderboard=sorted(user_stats.values(), key=lambda x:x["count"], reverse=True)[:10], w_cnt=len(words), word_list=list(words), media_list=list(media), status_list=statuses)
 
 @app.route("/stream")
 def stream():
@@ -478,10 +548,26 @@ def api_route(action):
     
     if action == "pull_update":
         try:
-            # Run git pull and pip requirements update
+            notes = d.get("notes", "").strip()
             subprocess.run(["git", "pull", "origin", "main"], check=True)
             subprocess.run(["pip3", "install", "-r", "requirements.txt", "--break-system-packages"], check=True)
-            # Spawn a background thread to safely exit after response finishes
+            
+            if notes:
+                webhook_url = os.getenv("UPDATE_WEBHOOK_URL")
+                if webhook_url:
+                    embed_payload = {
+                        "embeds": [{
+                            "title": "Goober System Update",
+                            "description": notes,
+                            "color": 0x89b4fa,
+                            "footer": {"text": "Updated via Dashboard Control Center"}
+                        }]
+                    }
+                    try:
+                        requests.post(webhook_url, json=embed_payload, timeout=5)
+                    except Exception:
+                        pass
+
             def delayed_restart():
                 time.sleep(1)
                 os._exit(0)
