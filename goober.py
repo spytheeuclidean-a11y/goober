@@ -49,6 +49,7 @@ def get_openai_response(prompt):
         temperature=0.2,
         max_completion_tokens=1024,
     )
+    return response
 
 
 
@@ -101,7 +102,9 @@ async def on_message(msg):
     if msg.author == bot.user or not msg.guild: return
     gid, up = str(msg.guild.id), False
     st, sm = get_set(gid), get_mem(gid)
-
+    if msg.content == "!learn": 
+        response = get_openai_response(" ".join(random.sample(list(words) + list(emojis) + list(media), random.randint(1, 10))) + " " + msg.content)
+        msg.reply(response.choices[0].message.content if response and response.choices else "goober")
     if not msg.content.startswith("!"):
         if st.get("media"):
             urls = [a.url for a in msg.attachments if a.content_type and any(x in a.content_type for x in ['image','gif'])] + [w for w in msg.content.split() if re.match(r'https?://\S+', w) and any(x in w.lower() for x in ['.gif','.png','.jpg','.jpeg','.webp','tenor.com'])]
