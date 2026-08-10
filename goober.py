@@ -14,7 +14,7 @@ bot = commands.Bot(command_prefix="!", intents=discord.Intents(message_content=T
 
 MEM_F, SET_F, START_TIME = "goober_memory.json", "goober_settings.json", time.time()
 words, emojis, media, server_mem, server_set, user_stats = set(), set(), set(), {}, {}, {}
-statuses = ["Learning 🧠", "Goobering 🤪", "Imagining 🎨", "Meming 🖼️"]
+statuses = ["Learning", "Goobering", "Imagining", "Meming"]
 status_cycle = itertools.cycle(statuses)
 
 for f, target in [(MEM_F, lambda d: (words.update(d.get("words",[])), emojis.update(d.get("emojis",[])), media.update(d.get("media",[])), server_mem.update(d.get("server_memories",{})), user_stats.update(d.get("user_stats",{})))), (SET_F, lambda d: (server_set.update(d), statuses.clear(), statuses.extend(d.get("custom_statuses", statuses))))]:
@@ -64,12 +64,11 @@ async def on_ready():
             await asyncio.sleep(60)
     bot.loop.create_task(rot())
 
-@bot.event
-async def on_message(msg):
-    if msg.author == bot.user or not msg.guild: return
-    gid, up = str(msg.guild.id), False
+def process_message_content(msg, gid):
+    global words, emojis, media
     st, sm = get_set(gid), get_mem(gid)
-
+    up = False
+    
     if not msg.content.startswith("!"):
         if st.get("media"):
             urls = [a.url for a in msg.attachments if a.content_type and any(x in a.content_type for x in ['image','gif'])] + [w for w in msg.content.split() if re.match(r'https?://\S+', w) and any(x in w.lower() for x in ['.gif','.png','.jpg','.jpeg','.webp','tenor.com'])]
@@ -81,13 +80,21 @@ async def on_message(msg):
         if st.get("words"):
             for cw in [w.strip(".,!?\"'()[]{}").lower() for w in msg.content.split() if not re.match(r'https?://\S+|<a?:[a-zA-Z0-9_]+:[0-9]+>', w)]:
                 if len(cw) > 1 and cw not in words: words.add(cw); sm["words"].add(cw); up = True
+                
+    if up: server_mem[gid] = {"words":list(sm["words"]),"emojis":list(sm["emojis"]),"media":list(sm["media"])}; save()
+
+@bot.event
+async def on_message(msg):
+    if msg.author == bot.user or not msg.guild: return
+    gid = str(msg.guild.id)
+    st, sm = get_set(gid), get_mem(gid)
+
+    process_message_content(msg, gid)
 
     trig = bot.user in msg.mentions or "goober" in msg.content.lower() or (msg.reference and msg.reference.resolved and msg.reference.resolved.author == bot.user)
     if trig:
         uid = str(msg.author.id)
-        user_stats.setdefault(uid, {"count":0, "name":""}); user_stats[uid]["count"] += 1; user_stats[uid]["name"] = msg.author.display_name; up = True
-
-    if up: server_mem[gid] = {"words":list(sm["words"]),"emojis":list(sm["emojis"]),"media":list(sm["media"])}; save()
+        user_stats.setdefault(uid, {"count":0, "name":""}); user_stats[uid]["count"] += 1; user_stats[uid]["name"] = msg.author.display_name; save()
 
     if trig and random.randint(1, 100) <= st.get("response_chance", 100):
         w_pool = get_pool(st.get("words_scope", "global"), "words", gid, words)
@@ -102,28 +109,57 @@ async def on_message(msg):
         except discord.HTTPException: pass
     await bot.process_commands(msg)
 
+# --- DISCORD COMMANDS ---
+@bot.command()
+async def help(ctx):
+    help_text = (
+        "Available Commands:\n"
+        "!help - Shows this list of commands.\n"
+        "!goob [prompt] - Generates an AI image based on your prompt.\n"
+        "!meme [text] - Creates a custom meme using learned media and text.\n"
+        "!readhistory [limit] - Scans past messages in the channel to absorb words and media.\n"
+        "!set_meme_channel [#channel] - Restricts meme generation to a specific channel (Admin).\n"
+        "!wipe_memory - Completely deletes all learned data across the bot (Admin).\n"
+        "!clear_mem [words/emojis/media] - Clears a specific memory category for this server (Admin).\n"
+        "!set_chance [1-100] - Changes the bot response probability percentage (Admin)."
+    )
+    await ctx.send(help_text)
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def readhistory(ctx, limit: int = 100):
+    limit = max(1, min(limit, 1000))
+    status_msg = await ctx.send(f"Scanning the last {limit} messages in this channel...")
+    gid = str(ctx.guild.id)
+    count = 0
+    async for msg in ctx.channel.history(limit=limit):
+        if msg.author != bot.user:
+            process_message_content(msg, gid)
+            count += 1
+    await status_msg.edit(content=f"Done. Read {count} historical messages into memory.")
+
 @bot.command()
 async def goob(ctx, *, prompt: str):
-    await (msg := await ctx.send(f"🎨 Imagining: `{prompt}`...")).delete()
-    await ctx.send(embed=discord.Embed(title=f"🎨 Goober Created: {prompt}", color=0x3498db).set_image(url=f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}").set_footer(text=f"Requested by {ctx.author.name}"))
+    await (msg := await ctx.send(f"Imagining: `{prompt}`...")).delete()
+    await ctx.send(embed=discord.Embed(title=f"Goober Created: {prompt}", color=0x3498db).set_image(url=f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}").set_footer(text=f"Requested by {ctx.author.name}"))
 
 @bot.command()
 async def meme(ctx, *, txt: str):
-    if not image_libs: return await ctx.send("❌ Error: Pillow missing.")
+    if not image_libs: return await ctx.send("Error: Pillow missing.")
     st, sm = get_set(str(ctx.guild.id)), get_mem(str(ctx.guild.id))
-    if st.get("meme_channel") and ctx.channel.id != st["meme_channel"]: return await ctx.send(f"⚠️ Use <#{st['meme_channel']}>.", delete_after=10)
+    if st.get("meme_channel") and ctx.channel.id != st["meme_channel"]: return await ctx.send(f"Use <#{st['meme_channel']}> for memes.", delete_after=10)
     
     pool = get_pool(st.get("media_scope", "global"), "media", str(ctx.guild.id), media)
-    if not pool: return await ctx.send("❌ Error: No media learned in this scope.")
+    if not pool: return await ctx.send("Error: No media learned in this scope.")
     url = random.choice(pool)
-    if any(x in url for x in ["tenor.com","giphy.com"]): return await ctx.send("❌ Randomly pulled a GIF. Try again.", delete_after=10)
+    if any(x in url for x in ["tenor.com","giphy.com"]): return await ctx.send("Randomly pulled a GIF. Try again.", delete_after=10)
     
-    await ctx.send("👨‍🍳 Cooking meme...", delete_after=5)
+    await ctx.send("Cooking meme...", delete_after=5)
     parts = txt.split('|', 1); t_t, b_t = parts[0].strip().upper(), parts[1].strip().upper() if len(parts)>1 else ""
     
     import requests
     try: img = Image.open(io.BytesIO(requests.get(url, timeout=10).content)).convert("RGBA")
-    except Exception: return await ctx.send("❌ Download failed.")
+    except Exception: return await ctx.send("Download failed.")
     
     d, (w, h) = ImageDraw.Draw(img), img.size
     try: f = ImageFont.truetype("arial.ttf", size=int(h/12))
@@ -139,26 +175,35 @@ async def meme(ctx, *, txt: str):
 @commands.has_permissions(administrator=True)
 async def set_meme_channel(ctx, c: discord.TextChannel = None):
     get_set(str(ctx.guild.id))["meme_channel"] = c.id if c else None; save()
-    await ctx.send(f"✅ Memes restricted to {c.mention}." if c else "✅ Meme restriction removed.")
+    await ctx.send(f"Memes restricted to {c.mention}." if c else "Meme restriction removed.")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def wipe_memory(ctx):
     words.clear(); emojis.clear(); media.clear(); server_mem.clear(); user_stats.clear(); save()
-    await ctx.send("🧹 Brain wiped!")
+    await ctx.send("Brain wiped completely.")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def clear_mem(ctx, category: str):
     category = category.lower()
     if category not in ["words", "emojis", "media"]:
-        return await ctx.send("❌ Category must be `words`, `emojis`, or `media`.")
+        return await ctx.send("Category must be words, emojis, or media.")
     sm = get_mem(str(ctx.guild.id))
     sm[category].clear()
     server_mem[str(ctx.guild.id)] = {k: list(v) for k, v in sm.items()}
     save()
-    await ctx.send(f"🧹 Cleared all {category} from this server's memory banks!")
+    await ctx.send(f"Cleared all {category} from this server's memory banks.")
 
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def set_chance(ctx, chance: int):
+    chance = max(1, min(100, chance))
+    get_set(str(ctx.guild.id))["response_chance"] = chance
+    save()
+    await ctx.send(f"Response chance set to {chance}% for this server.")
+
+# --- FLASK WEB SERVER & UI ---
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "secret123")
 
@@ -192,15 +237,15 @@ async function A(u,b={}){let r=await fetch(u,{method:"POST",headers:{"Content-Ty
 new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getElementById("u").innerText=d.u;document.getElementById("cp").style.width=d.c+'%';document.getElementById("rm").style.width=d.r+'%';};
 </script></head><body>
 <div class="header-bar">
-    <h2>🤖 Goober Suite Control Center</h2>
-    <a href="/logout" class="btn" style="background:var(--r);color:#111;text-decoration:none">Logout Session</a>
+    <h2>Goober Control Center</h2>
+    <a href="/logout" class="btn" style="background:var(--r);color:#111;text-decoration:none">Logout</a>
 </div>
 <div class="nav">
-    <button class="tb act" data-t="d" onclick="T('d',this)">📊 System Dashboard</button>
-    <button class="tb" data-t="r" onclick="T('r',this)">🏆 Leaderboard Ranks</button>
-    <button class="tb" data-t="b" onclick="T('b',this)">📢 Broadcast Message</button>
-    <button class="tb" data-t="s" onclick="T('s',this)">🌐 Servers & Scopes</button>
-    <button class="tb" data-t="m" onclick="T('m',this)">🧠 Memory Manager</button>
+    <button class="tb act" data-t="d" onclick="T('d',this)">System Dashboard</button>
+    <button class="tb" data-t="r" onclick="T('r',this)">Leaderboard</button>
+    <button class="tb" data-t="b" onclick="T('b',this)">Broadcast</button>
+    <button class="tb" data-t="s" onclick="T('s',this)">Servers & Scopes</button>
+    <button class="tb" data-t="m" onclick="T('m',this)">Memory Manager</button>
 </div>
 
 <div id="d" class="tc act">
@@ -240,26 +285,45 @@ new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getEl
                 <span class="chip" style="background:var(--a);color:#111;font-weight:bold">{{u.count}} interactions</span>
             </div>
         {% else %}
-            <p style="color:#9399b2;font-size:13px;margin:0">No interactions recorded yet. Mention or interact with Goober in Discord to populate ranks!</p>
+            <p style="color:#9399b2;font-size:13px;margin:0">No interactions recorded yet.</p>
         {% endfor %}
     </div>
 </div>
 
 <div id="b" class="tc">
     <div class="card">
-        <h3>Broadcast Message</h3>
+        <h3>Advanced Broadcast Message</h3>
         <form action="/send" method="post" enctype="multipart/form-data">
             <label style="font-size:12px;color:#9399b2">Target Channel</label>
             <select name="cid">
                 {% for c in channels %}
-                    <option value="{{c.id}}">{{c.guild}} ➔ #{{c.name}}</option>
+                    <option value="{{c.id}}">{{c.guild} &rarr; #{{c.name}}</option>
                 {% endfor %}
             </select>
-            <label style="font-size:12px;color:#9399b2">Message Text</label>
-            <textarea name="txt" rows="3" placeholder="Type your broadcast message..."></textarea>
-            <label style="font-size:12px;color:#9399b2">Optional File / Attachment</label>
-            <input type="file" name="file" style="margin-bottom:14px">
-            <button class="btn" style="background:var(--a);color:#111;width:100%;padding:10px">Send Message to Discord</button>
+            
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px; background:#141724; padding:8px; border-radius:6px;">
+                <input type="checkbox" name="use_embed" value="yes" id="ue" style="width:auto; margin:0;" checked>
+                <label for="ue" style="font-size:13px; cursor:pointer; margin:0; color:var(--t);">Use Embed Card (Uncheck for normal plain text message)</label>
+            </div>
+
+            <label style="font-size:12px;color:#9399b2">Embed Title (Only used if Embed is checked)</label>
+            <input type="text" name="embed_title" placeholder="Announcement Title...">
+
+            <label style="font-size:12px;color:#9399b2">Message Text / Description</label>
+            <textarea name="txt" rows="4" placeholder="Type your broadcast message content here..."></textarea>
+
+            <div style="display:flex; gap:10px; margin-bottom:12px;">
+                <div style="flex:1;">
+                    <label style="font-size:12px;color:#9399b2">Embed Accent Color</label>
+                    <input type="color" name="embed_color" value="#89b4fa" style="height:40px; padding:2px; cursor:pointer;">
+                </div>
+                <div style="flex:2;">
+                    <label style="font-size:12px;color:#9399b2">Optional File / Image Attachment</label>
+                    <input type="file" name="file">
+                </div>
+            </div>
+
+            <button class="btn" style="background:var(--a);color:#111;width:100%;padding:10px">Send Broadcast</button>
         </form>
     </div>
 </div>
@@ -301,8 +365,22 @@ new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getEl
 
 <div id="m" class="tc">
     <div class="card">
-        <h3>🧹 Bulk Clear Server Memory</h3>
-        <p style="font-size:12px;color:#9399b2;margin-top:0">Wipe an entire category for a specific server (or the global brain).</p>
+        <h3>Read Chat History (Backfill)</h3>
+        <p style="font-size:12px;color:#9399b2;margin-top:0">Scan past messages in any channel to pull words, emojis, and media into memory.</p>
+        <div class="grid-form">
+            <select id="h-chan" style="margin:0">
+                {% for c in channels %}
+                    <option value="{{c.id}}">{{c.guild} &rarr; #{{c.name}}</option>
+                {% endfor %}
+            </select>
+            <input type="number" id="h-lim" value="100" min="1" max="1000" style="width:80px;margin:0" placeholder="Limit">
+            <button class="btn" onclick="A('/read_history',{cid:document.getElementById('h-chan').value,limit:document.getElementById('h-lim').value})" style="background:var(--a);color:#111">Read History</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Bulk Clear Server Memory</h3>
+        <p style="font-size:12px;color:#9399b2;margin-top:0">Wipe an entire category for a specific server (or global brain).</p>
         <div class="grid-form">
             <select id="c-tgt" style="margin:0">
                 <option value="global">Global Brain</option>
@@ -358,7 +436,7 @@ def login():
             return redirect("/")
         else:
             error = "Invalid password!"
-    return f'<body style="background:#0f111a;color:#fff;text-align:center;padding:50px"><form method="post"><h2>🤖 Goober Login</h2><input type="password" name="pwd" placeholder="Password" style="padding:8px"><br><br><button style="padding:6px 12px">Login</button>{f"<p style=color:red>{error}</p>" if error else ""}</form></body>'
+    return f'<body style="background:#0f111a;color:#fff;text-align:center;padding:50px"><form method="post"><h2>Goober Login</h2><input type="password" name="pwd" placeholder="Password" style="padding:8px"><br><br><button style="padding:6px 12px">Login</button>{f"<p style=color:red>{error}</p>" if error else ""}</form></body>'
 
 @app.route("/logout")
 def logout():
@@ -444,6 +522,17 @@ def api_route(action):
     elif action == "set_chance":
         get_set(d.get("gid"))["response_chance"] = max(1, min(100, int(d.get("ch", 100))))
         
+    elif action == "read_history":
+        cid = d.get("cid")
+        limit = max(1, min(int(d.get("limit", 100)), 1000))
+        c = bot.get_channel(int(cid)) if cid else None
+        if c:
+            async def run_scan():
+                async for msg in c.history(limit=limit):
+                    if msg.author != bot.user:
+                        process_message_content(msg, str(c.guild.id))
+            asyncio.run_coroutine_threadsafe(run_scan(), bot.loop)
+
     elif action == "wipe":
         words.clear(); emojis.clear(); media.clear(); server_mem.clear(); user_stats.clear()
         save()
@@ -454,12 +543,34 @@ def api_route(action):
         
     elif action == "send":
         txt = request.form.get("txt", "").strip()
+        use_embed = request.form.get("use_embed") == "yes"
+        embed_title = request.form.get("embed_title", "").strip()
+        embed_color_hex = request.form.get("embed_color", "#89b4fa").lstrip("#")
         f = request.files.get("file")
         cid = request.form.get("cid")
         c = bot.get_channel(int(cid)) if cid else None
+        
         if c: 
             file_obj = discord.File(f, filename=f.filename) if f and f.filename else None
-            asyncio.run_coroutine_threadsafe(c.send(content=txt or None, file=file_obj), bot.loop)
+            embed_obj = None
+            
+            if use_embed:
+                try: color_int = int(embed_color_hex, 16)
+                except ValueError: color_int = 0x89b4fa
+                embed_obj = discord.Embed(title=embed_title or None, description=txt or None, color=color_int)
+                txt_content = None
+            else:
+                txt_content = txt or None
+
+            async def send_broadcast():
+                if embed_obj:
+                    if file_obj and f.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+                        embed_obj.set_image(url=f"attachment://{f.filename}")
+                    await c.send(embed=embed_obj, file=file_obj)
+                else:
+                    await c.send(content=txt_content, file=file_obj)
+
+            asyncio.run_coroutine_threadsafe(send_broadcast(), bot.loop)
         return redirect("/")
         
     else:
