@@ -1,4 +1,4 @@
-import discord, random, re, json, os, time, asyncio, threading, itertools, urllib.parse, io, requests, subprocess
+import discord, random, re, json, os, time, asyncio, threading, itertools, urllib.parse, io, requests, sys, subprocess
 from discord.ext import commands
 from flask import Flask, request, render_template_string, session, redirect, Response, jsonify
 from dotenv import load_dotenv
@@ -12,7 +12,7 @@ except ImportError: psutil = None
 load_dotenv()
 bot = commands.Bot(command_prefix="!", intents=discord.Intents(message_content=True, guilds=True, messages=True, reactions=True))
 
-MEM_F, SET_F, NOTES_F, START_TIME = "goober_memory.json", "goober_settings.json", "update_notes.txt", time.time()
+MEM_F, SET_F, NOTES_F, VER_F, START_TIME = "goober_memory.json", "goober_settings.json", "update_notes.txt", "version.txt", time.time()
 words, emojis, media, server_mem, server_set, user_stats = set(), set(), set(), {}, {}, {}
 statuses = ["Learning", "Goobering", "Imagining", "Meming"]
 status_cycle = itertools.cycle(statuses)
@@ -20,6 +20,25 @@ status_cycle = itertools.cycle(statuses)
 for f, target in [(MEM_F, lambda d: (words.update(d.get("words",[])), emojis.update(d.get("emojis",[])), media.update(d.get("media",[])), server_mem.update(d.get("server_memories",{})), user_stats.update(d.get("user_stats",{})))), (SET_F, lambda d: (server_set.update(d), statuses.clear(), statuses.extend(d.get("custom_statuses", statuses))))]:
     try: target(json.load(open(f))) if os.path.exists(f) else None
     except Exception: pass
+
+def get_current_version():
+    if os.path.exists(VER_F):
+        try:
+            with open(VER_F, "r", encoding="utf-8") as vf:
+                return float(vf.read().strip())
+        except Exception:
+            pass
+    return 1.00
+
+def set_next_version():
+    current = get_current_version()
+    new_ver = round(current + 0.01, 2)
+    try:
+        with open(VER_F, "w", encoding="utf-8") as vf:
+            vf.write(f"{new_ver:.2f}")
+    except Exception:
+        pass
+    return f"v{new_ver:.2f}"
 
 def update_status_cycle():
     global status_cycle
@@ -100,11 +119,10 @@ async def on_message(msg):
             try:
                 with open(NOTES_F, "r", encoding="utf-8") as nf:
                     notes = nf.read().strip()
-                os.remove(NOTES_F) # Clear after reading
+                os.remove(NOTES_F)
             except Exception:
                 pass
         
-        # Fallback if manual text was typed right after command
         manual_notes = msg.content[len("!cgoobdate"):].strip()
         if manual_notes:
             notes = manual_notes
@@ -285,9 +303,9 @@ function updateChannels(serverSelectId, channelSelectId) {
 }
 async function pullUpdate() {
     let notes = prompt("Enter update notes:");
-    if (notes === null) return; // User cancelled
+    if (notes === null) return;
     notes = notes.trim();
-    if (!notes) return; // Empty notes, do nothing
+    if (!notes) return;
     
     let r = await fetch('/pull_update', {
         method: "POST",
@@ -556,11 +574,19 @@ def api_route(action):
         try:
             notes = d.get("notes", "").strip()
             if notes:
+                next_version = set_next_version()
+                formatted_notes = f"**Version {next_version}**\n\n{notes}"
                 with open(NOTES_F, "w", encoding="utf-8") as nf:
-                    nf.write(notes)
+                    nf.write(formatted_notes)
 
             subprocess.run(["git", "pull", "origin", "main"], check=True)
-            subprocess.run(["pip3", "install", "-r", "requirements.txt", "--break-system-packages"], check=True)
+            
+            pip_executable = "pip3"
+            venv_pip = os.path.join(sys.prefix, "bin", "pip")
+            if os.path.exists(venv_pip):
+                pip_executable = venv_pip
+
+            subprocess.run([pip_executable, "install", "-r", "requirements.txt"], check=True)
             
             def delayed_restart():
                 time.sleep(1)
