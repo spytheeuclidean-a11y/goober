@@ -83,20 +83,20 @@ async def on_ready():
             await asyncio.sleep(60)
     bot.loop.create_task(rot())
 
-def process_message_content(msg, gid):
+def process_message_content(msg, gid, target_type="all"):
     global words, emojis, media
     st, sm = get_set(gid), get_mem(gid)
     up = False
     
     if not msg.content.startswith("!"):
-        if st.get("media"):
+        if target_type in ["all", "media"] and st.get("media"):
             urls = [a.url for a in msg.attachments if a.content_type and any(x in a.content_type for x in ['image','gif'])] + [w for w in msg.content.split() if re.match(r'https?://\S+', w) and any(x in w.lower() for x in ['.gif','.png','.jpg','.jpeg','.webp','tenor.com'])]
             for u in urls:
                 if u not in media: media.add(u); sm["media"].add(u); up = True
-        if st.get("emojis"):
+        if target_type in ["all", "emojis"] and st.get("emojis"):
             for e in set(re.findall(r'<a?:[a-zA-Z0-9_]+:[0-9]+>', msg.content)) - emojis:
                 emojis.add(e); sm["emojis"].add(e); up = True
-        if st.get("words"):
+        if target_type in ["all", "words"] and st.get("words"):
             for cw in [w.strip(".,!?\"'()[]{}").lower() for w in msg.content.split() if not re.match(r'https?://\S+|<a?:[a-zA-Z0-9_]+:[0-9]+>', w)]:
                 if len(cw) > 1 and cw not in words: words.add(cw); sm["words"].add(cw); up = True
                 
@@ -108,7 +108,7 @@ async def on_message(msg):
     gid = str(msg.guild.id)
     st, sm = get_set(gid), get_mem(gid)
 
-    process_message_content(msg, gid)
+    process_message_content(msg, gid, "all")
 
     if msg.content.startswith("!cgoobdate"):
         if not msg.author.guild_permissions.administrator:
@@ -161,27 +161,55 @@ async def ghelp(ctx):
     embed.add_field(name="!ghelp", value="Shows this command reference embed.", inline=False)
     embed.add_field(name="!goob [prompt]", value="Generates an AI image based on your prompt.", inline=False)
     embed.add_field(name="!meme [text]", value="Creates a custom meme using learned media and top/bottom text separated by a vertical bar.", inline=False)
-    embed.add_field(name="!readhistory [limit]", value="Scans past messages in the channel to absorb words, emojis, and media.", inline=False)
+    embed.add_field(name="!readwords [limit]", value="Scans past messages to absorb words only (Admin).", inline=False)
+    embed.add_field(name="!reademojis [limit]", value="Scans past messages to absorb emojis only (Admin).", inline=False)
+    embed.add_field(name="!readmedia [limit]", value="Scans past messages to absorb media URLs only (Admin).", inline=False)
     embed.add_field(name="!set_meme_channel [#channel]", value="Restricts meme generation to a specific text channel (Admin).", inline=False)
     embed.add_field(name="!wipe_memory", value="Completely deletes all learned data across the bot brain (Admin).", inline=False)
     embed.add_field(name="!clear_mem [words/emojis/media]", value="Clears a specific memory category for this server (Admin).", inline=False)
     embed.add_field(name="!set_chance [1-100]", value="Changes the bot response probability percentage for this server (Admin).", inline=False)
     embed.add_field(name="!cgoobdate", value="Broadcasts the dashboard update notes as a dedicated embed in the current channel (Admin).", inline=False)
-    embed.add_field(name="Dashboard Features", value="Memory Injector, Cross-Server Dictionaries, Broadcast Messaging, System Health Monitor, Leaderboards, Repository Pull Button with Notes, and Custom Statuses are fully controllable via the web dashboard.", inline=False)
+    embed.add_field(name="Dashboard Features", value="Memory Injector, Granular Chat Readers, Cross-Server Dictionaries, Broadcast Messaging, System Health Monitor, Leaderboards, Repository Pull Button with Notes, and Custom Statuses are fully controllable via the web dashboard.", inline=False)
     await ctx.send(embed=embed)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def readhistory(ctx, limit: int = 100):
+async def readwords(ctx, limit: int = 100):
     limit = max(1, min(limit, 1000))
-    status_msg = await ctx.send(f"Scanning the last {limit} messages in this channel...")
+    status_msg = await ctx.send(f"Scanning the last {limit} messages for words...")
     gid = str(ctx.guild.id)
     count = 0
     async for msg in ctx.channel.history(limit=limit):
         if msg.author != bot.user:
-            process_message_content(msg, gid)
+            process_message_content(msg, gid, "words")
             count += 1
-    await status_msg.edit(content=f"Done. Read {count} historical messages into memory.")
+    await status_msg.edit(content=f"Done. Read {count} historical messages for words.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def reademojis(ctx, limit: int = 100):
+    limit = max(1, min(limit, 1000))
+    status_msg = await ctx.send(f"Scanning the last {limit} messages for emojis...")
+    gid = str(ctx.guild.id)
+    count = 0
+    async for msg in ctx.channel.history(limit=limit):
+        if msg.author != bot.user:
+            process_message_content(msg, gid, "emojis")
+            count += 1
+    await status_msg.edit(content=f"Done. Read {count} historical messages for emojis.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def readmedia(ctx, limit: int = 100):
+    limit = max(1, min(limit, 1000))
+    status_msg = await ctx.send(f"Scanning the last {limit} messages for media...")
+    gid = str(ctx.guild.id)
+    count = 0
+    async for msg in ctx.channel.history(limit=limit):
+        if msg.author != bot.user:
+            process_message_content(msg, gid, "media")
+            count += 1
+    await status_msg.edit(content=f"Done. Read {count} historical messages for media.")
 
 @bot.command()
 async def goob(ctx, *, prompt: str):
@@ -282,7 +310,9 @@ document.addEventListener("DOMContentLoaded",()=>{
     let btn=document.querySelector(`[data-t="${s}"]`)||document.querySelector('.tb');
     if(btn)T(s,btn);
     updateChannels('b-server', 'b-chan');
-    updateChannels('h-server', 'h-chan');
+    updateChannels('hw-server', 'hw-chan');
+    updateChannels('he-server', 'he-chan');
+    updateChannels('hm-server', 'hm-chan');
 });
 async function A(u,b={}){let r=await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});let j=await r.json();if(j.ok)location.reload();else alert(j.msg||"Action failed");}
 function updateChannels(serverSelectId, channelSelectId) {
@@ -296,7 +326,7 @@ function updateChannels(serverSelectId, channelSelectId) {
             option.style.display = 'none';
         }
     }
-    let firstVisible = Array.from(cSel.options).find(o => o.getAttribute('data-guild') === chosenGuild);
+    let firstVisible = Array.from(cSel.options).find(o => o.getAttribute('data-guild'] === chosenGuild);
     if (firstVisible) {
         cSel.value = firstVisible.value;
     }
@@ -463,21 +493,59 @@ new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getEl
 
 <div id="m" class="tc">
     <div class="card">
-        <h3>Read Chat History (Backfill)</h3>
-        <p style="font-size:12px;color:#9399b2;margin-top:0">Scan past messages in any channel to pull words, emojis, and media into memory.</p>
+        <h3>Read Chat History: Words (Messages)</h3>
+        <p style="font-size:12px;color:#9399b2;margin-top:0">Scan past messages to absorb words only.</p>
         <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:center;">
-            <select id="h-server" onchange="updateChannels('h-server', 'h-chan')" style="margin:0">
+            <select id="hw-server" onchange="updateChannels('hw-server', 'hw-chan')" style="margin:0">
                 {% for g in guilds %}
                     <option value="{{g.id}}">{{g.name}}</option>
                 {% endfor %}
             </select>
-            <select id="h-chan" style="margin:0">
+            <select id="hw-chan" style="margin:0">
                 {% for c in channels %}
                     <option value="{{c.id}}" data-guild="{{c.guild_id}}">#{{c.name}}</option>
                 {% endfor %}
             </select>
-            <input type="number" id="h-lim" value="100" min="1" max="1000" style="width:80px;margin:0" placeholder="Limit">
-            <button class="btn" onclick="A('/read_history',{cid:document.getElementById('h-chan').value,limit:document.getElementById('h-lim').value})" style="background:var(--a);color:#111">Read History</button>
+            <input type="number" id="hw-lim" value="100" min="1" max="1000" style="width:80px;margin:0" placeholder="Limit">
+            <button class="btn" onclick="A('/read_history',{type:'words',cid:document.getElementById('hw-chan').value,limit:document.getElementById('hw-lim').value})" style="background:var(--a);color:#111">Read Words</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Read Chat History: Emojis</h3>
+        <p style="font-size:12px;color:#9399b2;margin-top:0">Scan past messages to absorb custom emojis only.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:center;">
+            <select id="he-server" onchange="updateChannels('he-server', 'he-chan')" style="margin:0">
+                {% for g in guilds %}
+                    <option value="{{g.id}}">{{g.name}}</option>
+                {% endfor %}
+            </select>
+            <select id="he-chan" style="margin:0">
+                {% for c in channels %}
+                    <option value="{{c.id}}" data-guild="{{c.guild_id}}">#{{c.name}}</option>
+                {% endfor %}
+            </select>
+            <input type="number" id="he-lim" value="100" min="1" max="1000" style="width:80px;margin:0" placeholder="Limit">
+            <button class="btn" onclick="A('/read_history',{type:'emojis',cid:document.getElementById('he-chan').value,limit:document.getElementById('he-lim').value})" style="background:var(--a);color:#111">Read Emojis</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Read Chat History: Media URLs</h3>
+        <p style="font-size:12px;color:#9399b2;margin-top:0">Scan past messages to absorb images and GIFs only.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:center;">
+            <select id="hm-server" onchange="updateChannels('hm-server', 'hm-chan')" style="margin:0">
+                {% for g in guilds %}
+                    <option value="{{g.id}}">{{g.name}}</option>
+                {% endfor %}
+            </select>
+            <select id="hm-chan" style="margin:0">
+                {% for c in channels %}
+                    <option value="{{c.id}}" data-guild="{{c.guild_id}}">#{{c.name}}</option>
+                {% endfor %}
+            </select>
+            <input type="number" id="hm-lim" value="100" min="1" max="1000" style="width:80px;margin:0" placeholder="Limit">
+            <button class="btn" onclick="A('/read_history',{type:'media',cid:document.getElementById('hm-chan').value,limit:document.getElementById('hm-lim').value})" style="background:var(--a);color:#111">Read Media</button>
         </div>
     </div>
 
@@ -655,13 +723,14 @@ def api_route(action):
         
     elif action == "read_history":
         cid = d.get("cid")
+        target_type = d.get("type", "all")
         limit = max(1, min(int(d.get("limit", 100)), 1000))
         c = bot.get_channel(int(cid)) if cid else None
         if c:
             async def run_scan():
                 async for msg in c.history(limit=limit):
                     if msg.author != bot.user:
-                        process_message_content(msg, str(c.guild.id))
+                        process_message_content(msg, str(c.guild.id), target_type)
             asyncio.run_coroutine_threadsafe(run_scan(), bot.loop)
 
     elif action == "wipe":
