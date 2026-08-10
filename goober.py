@@ -111,10 +111,10 @@ async def on_message(msg):
 
 # --- DISCORD COMMANDS ---
 @bot.command()
-async def help(ctx):
+async def commands(ctx):
     help_text = (
         "Available Commands:\n"
-        "!help - Shows this list of commands.\n"
+        "!commands - Shows this list of commands.\n"
         "!goob [prompt] - Generates an AI image based on your prompt.\n"
         "!meme [text] - Creates a custom meme using learned media and text.\n"
         "!readhistory [limit] - Scans past messages in the channel to absorb words and media.\n"
