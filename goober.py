@@ -1,4 +1,4 @@
-import discord, random, re, json, os, time, asyncio, threading, itertools, urllib.parse, io, requests
+import discord, random, re, json, os, time, asyncio, threading, itertools, urllib.parse, io, requests, subprocess
 from discord.ext import commands
 from flask import Flask, request, render_template_string, session, redirect, Response, jsonify
 from dotenv import load_dotenv
@@ -128,7 +128,7 @@ async def ghelp(ctx):
     embed.add_field(name="!wipe_memory", value="Completely deletes all learned data across the bot brain (Admin).", inline=False)
     embed.add_field(name="!clear_mem [words/emojis/media]", value="Clears a specific memory category for this server (Admin).", inline=False)
     embed.add_field(name="!set_chance [1-100]", value="Changes the bot response probability percentage for this server (Admin).", inline=False)
-    embed.add_field(name="Dashboard Features", value="Memory Injector, Cross-Server Dictionaries, Broadcast Messaging, System Health Monitor, Leaderboards, and Custom Statuses are fully controllable via the web dashboard.", inline=False)
+    embed.add_field(name="Dashboard Features", value="Memory Injector, Cross-Server Dictionaries, Broadcast Messaging, System Health Monitor, Leaderboards, Repository Pull Button, and Custom Statuses are fully controllable via the web dashboard.", inline=False)
     await ctx.send(embed=embed)
 
 @bot.command()
@@ -239,7 +239,7 @@ select.scope-select {background:var(--o); color:#111; padding:6px; width:auto; m
 <script>
 function T(n,b){document.querySelectorAll('.tc').forEach(x=>x.classList.remove('act'));document.querySelectorAll('.tb').forEach(x=>x.classList.remove('act'));document.getElementById(n).classList.add('act');b.classList.add('act');localStorage.setItem('gT',n)}
 document.addEventListener("DOMContentLoaded",()=>{let s=localStorage.getItem('gT')||'d';let btn=document.querySelector(`[data-t="${s}"]`)||document.querySelector('.tb');if(btn)T(s,btn)});
-async function A(u,b={}){let r=await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});if((await r.json()).ok)location.reload()}
+async function A(u,b={}){let r=await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});let j=await r.json();if(j.ok)location.reload();else alert(j.msg||"Action failed");}
 new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getElementById("u").innerText=d.u;document.getElementById("cp").style.width=d.c+'%';document.getElementById("rm").style.width=d.r+'%';};
 </script></head><body>
 <div class="header-bar">
@@ -272,6 +272,11 @@ new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getEl
                 <span class="chip">{{s}} <button class="btn" onclick="A('/del_status',{idx:{{loop.index0}}})" style="background:var(--r);padding:2px 6px;font-size:10px;color:#fff">✕</button></span>
             {% endfor %}
         </div>
+    </div>
+    <div class="card">
+        <h3>Repository Update Control</h3>
+        <p style="font-size:12px;color:#9399b2;margin-top:0">Instantly fetch the latest code from GitHub and restart the server instance.</p>
+        <button class="btn" onclick="if(confirm('Pull latest update from repository and restart?')) A('/pull_update')" style="background:var(--a);color:#111;width:100%;padding:10px">Update from Repository</button>
     </div>
     <div class="card">
         <h3>Danger Zone Controls</h3>
@@ -425,7 +430,7 @@ new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getEl
         <h3>Learned Words ({{w_cnt}})</h3>
         <div style="max-height:220px;overflow-y:auto;padding-right:4px">
             {% for w in word_list %}
-                <span class="chip">{{w}} <button class="btn" onclick="A('/del_item',{type:'word',val:'{{w}}'})" style="background:var(--r);padding:2px 6px;font-size:10px;color:#fff">✕</button></span>
+                <span class="chip">{{w} <button class="btn" onclick="A('/del_item',{type:'word',val:'{{w}}'})" style="background:var(--r);padding:2px 6px;font-size:10px;color:#fff">✕</button></span>
             {% endfor %}
         </div>
     </div>
@@ -471,7 +476,21 @@ def api_route(action):
     d = request.get_json(silent=True) or {}
     ok = True
     
-    if action == "inject":
+    if action == "pull_update":
+        try:
+            # Run git pull and pip requirements update
+            subprocess.run(["git", "pull", "origin", "main"], check=True)
+            subprocess.run(["pip3", "install", "-r", "requirements.txt", "--break-system-packages"], check=True)
+            # Spawn a background thread to safely exit after response finishes
+            def delayed_restart():
+                time.sleep(1)
+                os._exit(0)
+            threading.Thread(target=delayed_restart).start()
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"ok": False, "msg": str(e)})
+
+    elif action == "inject":
         t, v, gid = d.get("type"), d.get("value", "").strip(), d.get("gid", "global")
         if gid != "global":
             sm = get_mem(gid)
