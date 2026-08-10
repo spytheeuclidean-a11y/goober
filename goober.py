@@ -1,8 +1,3 @@
-#goober,euclid80tr
-from dotenv import load_dotenv
-import os
-load_dotenv()
-token = os.getenv("DISCORD_TOKEN")
 import discord, random, re, json, os, time, asyncio, threading, itertools, urllib.parse, io
 from discord.ext import commands
 from flask import Flask, request, render_template_string, session, redirect, Response, jsonify
@@ -55,6 +50,11 @@ def draw_txt(d, t, y, w, f):
     for ox, oy in [(-2,-2),(2,-2),(-2,2),(2,2),(-2,0),(2,0),(0,-2),(0,2)]: d.text((((w-d.textlength(t,f))//2)+ox, y+oy), t, font=f, fill='black')
     d.text(((w-d.textlength(t,f))//2, y), t, font=f, fill='white')
 
+def get_pool(scope, cat_name, gid, global_set):
+    if scope == "global": return list(global_set)
+    if scope == "local": return list(get_mem(gid)[cat_name])
+    return list(get_mem(scope)[cat_name])
+
 @bot.event
 async def on_ready():
     print(f"Online as: {bot.user.name}")
@@ -90,11 +90,15 @@ async def on_message(msg):
     if up: server_mem[gid] = {"words":list(sm["words"]),"emojis":list(sm["emojis"]),"media":list(sm["media"])}; save()
 
     if trig and random.randint(1, 100) <= st.get("response_chance", 100):
-        pool = (list(sm["words"]) if st.get("words_scope")=="local" else list(words)) + (list(sm["emojis"]) if st.get("emojis_scope")=="local" else list(emojis)) + (list(sm["media"]) if st.get("media_scope")=="local" else list(media))
+        w_pool = get_pool(st.get("words_scope", "global"), "words", gid, words)
+        e_pool = get_pool(st.get("emojis_scope", "global"), "emojis", gid, emojis)
+        m_pool = get_pool(st.get("media_scope", "global"), "media", gid, media)
+        pool = w_pool + e_pool + m_pool
         await msg.channel.send(" ".join(random.sample(pool, random.randint(1, min(5, len(pool))))) if pool else "goober")
 
     if random.randint(1, 100) == 1:
-        try: await msg.add_reaction(random.choice((list(sm["emojis"]) if st.get("emojis_scope")=="local" else list(emojis)) + ["👍","😂","💀","🔥","😎","💩","👀"]))
+        r_pool = get_pool(st.get("emojis_scope", "global"), "emojis", gid, emojis)
+        try: await msg.add_reaction(random.choice(r_pool + ["👍","😂","💀","🔥","😎","💩","👀"]))
         except discord.HTTPException: pass
     await bot.process_commands(msg)
 
@@ -108,8 +112,9 @@ async def meme(ctx, *, txt: str):
     if not image_libs: return await ctx.send("❌ Error: Pillow missing.")
     st, sm = get_set(str(ctx.guild.id)), get_mem(str(ctx.guild.id))
     if st.get("meme_channel") and ctx.channel.id != st["meme_channel"]: return await ctx.send(f"⚠️ Use <#{st['meme_channel']}>.", delete_after=10)
-    pool = list(sm["media"] if st.get("media_scope")=="local" else media)
-    if not pool: return await ctx.send("❌ Error: No media learned.")
+    
+    pool = get_pool(st.get("media_scope", "global"), "media", str(ctx.guild.id), media)
+    if not pool: return await ctx.send("❌ Error: No media learned in this scope.")
     url = random.choice(pool)
     if any(x in url for x in ["tenor.com","giphy.com"]): return await ctx.send("❌ Randomly pulled a GIF. Try again.", delete_after=10)
     
@@ -142,6 +147,18 @@ async def wipe_memory(ctx):
     words.clear(); emojis.clear(); media.clear(); server_mem.clear(); user_stats.clear(); save()
     await ctx.send("🧹 Brain wiped!")
 
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def clear_mem(ctx, category: str):
+    category = category.lower()
+    if category not in ["words", "emojis", "media"]:
+        return await ctx.send("❌ Category must be `words`, `emojis`, or `media`.")
+    sm = get_mem(str(ctx.guild.id))
+    sm[category].clear()
+    server_mem[str(ctx.guild.id)] = {k: list(v) for k, v in sm.items()}
+    save()
+    await ctx.send(f"🧹 Cleared all {category} from this server's memory banks!")
+
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "secret123")
 
@@ -166,6 +183,7 @@ input,select,textarea{width:100%;padding:10px;background:#121420;color:#fff;bord
 .pf{background:var(--a);height:100%;width:0%;transition:width .4s ease}
 .grid-form{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center}
 .server-controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+select.scope-select {background:var(--o); color:#111; padding:6px; width:auto; margin:0; border:none; font-weight:bold; cursor:pointer;}
 </style>
 <script>
 function T(n,b){document.querySelectorAll('.tc').forEach(x=>x.classList.remove('act'));document.querySelectorAll('.tb').forEach(x=>x.classList.remove('act'));document.getElementById(n).classList.add('act');b.classList.add('act');localStorage.setItem('gT',n)}
@@ -248,17 +266,33 @@ new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getEl
 
 <div id="s" class="tc">
     <div class="card">
-        <h3>Servers and Scopes</h3>
+        <h3>Servers and Scopes (Cross-Server Linking)</h3>
         {% for g in guilds %}
             <div class="row">
                 <div style="font-weight:600">{{g.name}}</div>
                 <div class="server-controls">
-                    <input type="number" id="ch-{{g.id}}" value="{{g.st.response_chance}}" min="1" max="100" style="width:60px;margin:0;padding:6px">
-                    <button class="btn" onclick="A('/set_chance',{gid:'{{g.id}}',ch:document.getElementById('ch-{{g.id}}').value})" style="background:var(--a);color:#111">Chance %</button>
-                    <button class="btn" onclick="A('/toggle',{gid:'{{g.id}}',t:'words_scope'})" style="background:var(--o);color:#111">Words: {{g.st.words_scope[:1].upper()}}</button>
-                    <button class="btn" onclick="A('/toggle',{gid:'{{g.id}}',t:'emojis_scope'})" style="background:var(--o);color:#111">Emojis: {{g.st.emojis_scope[:1].upper()}}</button>
-                    <button class="btn" onclick="A('/toggle',{gid:'{{g.id}}',t:'media_scope'})" style="background:var(--o);color:#111">Media: {{g.st.media_scope[:1].upper()}}</button>
-                    <button class="btn" onclick="A('/toggle',{gid:'{{g.id}}',t:'words'})" style="background:{{'var(--g)' if g.st.words else 'var(--r)'}};color:#111">Learning</button>
+                    <input type="number" id="ch-{{g.id}}" value="{{g.st.response_chance}}" min="1" max="100" style="width:60px;margin:0;padding:6px" title="Response Chance %">
+                    <button class="btn" onclick="A('/set_chance',{gid:'{{g.id}}',ch:document.getElementById('ch-{{g.id}}').value})" style="background:var(--a);color:#111">Save %</button>
+                    
+                    <select class="scope-select" onchange="A('/set_scope',{gid:'{{g.id}}',cat:'words_scope',val:this.value})">
+                        <option value="global" {% if g.st.words_scope == 'global' %}selected{% endif %}>Words: Global</option>
+                        <option value="local" {% if g.st.words_scope == 'local' %}selected{% endif %}>Words: Local</option>
+                        {% for og in guilds %}{% if og.id != g.id %}<option value="{{og.id}}" {% if g.st.words_scope == og.id %}selected{% endif %}>Words: {{og.name}}</option>{% endif %}{% endfor %}
+                    </select>
+
+                    <select class="scope-select" onchange="A('/set_scope',{gid:'{{g.id}}',cat:'emojis_scope',val:this.value})">
+                        <option value="global" {% if g.st.emojis_scope == 'global' %}selected{% endif %}>Emojis: Global</option>
+                        <option value="local" {% if g.st.emojis_scope == 'local' %}selected{% endif %}>Emojis: Local</option>
+                        {% for og in guilds %}{% if og.id != g.id %}<option value="{{og.id}}" {% if g.st.emojis_scope == og.id %}selected{% endif %}>Emojis: {{og.name}}</option>{% endif %}{% endfor %}
+                    </select>
+
+                    <select class="scope-select" onchange="A('/set_scope',{gid:'{{g.id}}',cat:'media_scope',val:this.value})">
+                        <option value="global" {% if g.st.media_scope == 'global' %}selected{% endif %}>Media: Global</option>
+                        <option value="local" {% if g.st.media_scope == 'local' %}selected{% endif %}>Media: Local</option>
+                        {% for og in guilds %}{% if og.id != g.id %}<option value="{{og.id}}" {% if g.st.media_scope == og.id %}selected{% endif %}>Media: {{og.name}}</option>{% endif %}{% endfor %}
+                    </select>
+
+                    <button class="btn" onclick="A('/toggle',{gid:'{{g.id}}',t:'words'})" style="background:{{'var(--g)' if g.st.words else 'var(--r)'}};color:#111" title="Toggle active learning">Learning</button>
                 </div>
             </div>
         {% endfor %}
@@ -266,6 +300,25 @@ new EventSource("/stream").onmessage=e=>{let d=JSON.parse(e.data);document.getEl
 </div>
 
 <div id="m" class="tc">
+    <div class="card">
+        <h3>🧹 Bulk Clear Server Memory</h3>
+        <p style="font-size:12px;color:#9399b2;margin-top:0">Wipe an entire category for a specific server (or the global brain).</p>
+        <div class="grid-form">
+            <select id="c-tgt" style="margin:0">
+                <option value="global">Global Brain</option>
+                {% for g in guilds %}
+                    <option value="{{g.id}}">{{g.name}}</option>
+                {% endfor %}
+            </select>
+            <select id="c-t" style="margin:0">
+                <option value="words">Words</option>
+                <option value="emojis">Emojis</option>
+                <option value="media">Media URLs</option>
+            </select>
+            <button class="btn" onclick="if(confirm('Are you sure you want to wipe this entire category?')) A('/clear_category',{type:document.getElementById('c-t').value,gid:document.getElementById('c-tgt').value})" style="background:var(--o);color:#111">Wipe Category</button>
+        </div>
+    </div>
+    
     <div class="card">
         <h3>Memory Injector</h3>
         <div class="grid-form">
@@ -316,7 +369,7 @@ def logout():
 def home():
     if not session.get("auth"): 
         return redirect("/login")
-    return render_template_string(HTML, channels=[{"id":c.id,"name":c.name,"guild":g.name} for g in bot.guilds for c in g.text_channels], guilds=[{"id":g.id,"name":g.name,"st":get_set(g.id)} for g in bot.guilds], leaderboard=sorted(user_stats.values(), key=lambda x:x["count"], reverse=True)[:10], w_cnt=len(words), word_list=list(words), media_list=list(media), status_list=statuses)
+    return render_template_string(HTML, channels=[{"id":c.id,"name":c.name,"guild":g.name} for g in bot.guilds for c in g.text_channels], guilds=[{"id":str(g.id),"name":g.name,"st":get_set(g.id)} for g in bot.guilds], leaderboard=sorted(user_stats.values(), key=lambda x:x["count"], reverse=True)[:10], w_cnt=len(words), word_list=list(words), media_list=list(media), status_list=statuses)
 
 @app.route("/stream")
 def stream():
@@ -358,6 +411,17 @@ def api_route(action):
             if t == "word" and v in words: words.remove(v)
             elif t == "media" and v in media: media.remove(v)
             
+    elif action == "clear_category":
+        t, gid = d.get("type"), d.get("gid", "global")
+        if gid != "global":
+            sm = get_mem(gid)
+            if t in sm: sm[t].clear()
+            server_mem[gid] = {k: list(v) for k, v in sm.items()}
+        else:
+            if t == "words": words.clear()
+            elif t == "emojis": emojis.clear()
+            elif t == "media": media.clear()
+            
     elif action == "add_status":
         st = d.get("status", "").strip()
         if st and st not in statuses: 
@@ -369,13 +433,13 @@ def api_route(action):
         if 0 <= idx < len(statuses): 
             statuses.pop(idx)
             update_status_cycle()
+
+    elif action == "set_scope":
+        get_set(d.get("gid"))[d.get("cat")] = d.get("val")
             
     elif action == "toggle":
         st, t = get_set(d.get("gid")), d.get("t")
-        if "scope" in t:
-            st[t] = "local" if st.get(t, "global") == "global" else "global"
-        else:
-            st[t] = not st.get(t, True)
+        st[t] = not st.get(t, True)
             
     elif action == "set_chance":
         get_set(d.get("gid"))["response_chance"] = max(1, min(100, int(d.get("ch", 100))))
