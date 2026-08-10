@@ -12,7 +12,7 @@ except ImportError: psutil = None
 load_dotenv()
 bot = commands.Bot(command_prefix="!", intents=discord.Intents(message_content=True, guilds=True, messages=True, reactions=True))
 
-MEM_F, SET_F, START_TIME = "goober_memory.json", "goober_settings.json", time.time()
+MEM_F, SET_F, NOTES_F, START_TIME = "goober_memory.json", "goober_settings.json", "update_notes.txt", time.time()
 words, emojis, media, server_mem, server_set, user_stats = set(), set(), set(), {}, {}, {}
 statuses = ["Learning", "Goobering", "Imagining", "Meming"]
 status_cycle = itertools.cycle(statuses)
@@ -95,22 +95,27 @@ async def on_message(msg):
         if not msg.author.guild_permissions.administrator:
             return await msg.channel.send("You need administrator permissions to use this command.")
         
-        notes = msg.content[len("!cgoobdate"):].strip()
+        notes = ""
+        if os.path.exists(NOTES_F):
+            try:
+                with open(NOTES_F, "r", encoding="utf-8") as nf:
+                    notes = nf.read().strip()
+                os.remove(NOTES_F) # Clear after reading
+            except Exception:
+                pass
+        
+        # Fallback if manual text was typed right after command
+        manual_notes = msg.content[len("!cgoobdate"):].strip()
+        if manual_notes:
+            notes = manual_notes
+
         if not notes:
-            return await msg.channel.send("Please provide update notes after the command. Example: `!cgoobdate Bug fixes applied.`")
+            return await msg.channel.send("No update notes found from the dashboard. Type `!cgoobdate [notes]` or pull an update from the dashboard first.")
         
         embed = discord.Embed(title="Goober System Update", description=notes, color=0x89b4fa)
         embed.set_footer(text=f"Triggered by {msg.author.name}")
         
-        webhook_url = os.getenv("UPDATE_WEBHOOK_URL")
-        if webhook_url:
-            try:
-                requests.post(webhook_url, json={"embeds": [embed.to_dict()]}, timeout=5)
-                await msg.channel.send("Update notes successfully broadcasted to webhook.")
-            except Exception as e:
-                await msg.channel.send(f"Failed to post to webhook: {e}")
-        else:
-            await msg.channel.send(embed=embed)
+        await msg.channel.send(embed=embed)
         return
 
     trig = bot.user in msg.mentions or "goober" in msg.content.lower() or (msg.reference and msg.reference.resolved and msg.reference.resolved.author == bot.user)
@@ -143,7 +148,7 @@ async def ghelp(ctx):
     embed.add_field(name="!wipe_memory", value="Completely deletes all learned data across the bot brain (Admin).", inline=False)
     embed.add_field(name="!clear_mem [words/emojis/media]", value="Clears a specific memory category for this server (Admin).", inline=False)
     embed.add_field(name="!set_chance [1-100]", value="Changes the bot response probability percentage for this server (Admin).", inline=False)
-    embed.add_field(name="!cgoobdate [notes]", value="Broadcasts update notes as a dedicated embed (Admin).", inline=False)
+    embed.add_field(name="!cgoobdate", value="Broadcasts the dashboard update notes as a dedicated embed in the current channel (Admin).", inline=False)
     embed.add_field(name="Dashboard Features", value="Memory Injector, Cross-Server Dictionaries, Broadcast Messaging, System Health Monitor, Leaderboards, Repository Pull Button with Notes, and Custom Statuses are fully controllable via the web dashboard.", inline=False)
     await ctx.send(embed=embed)
 
@@ -282,6 +287,7 @@ async function pullUpdate() {
     let notes = prompt("Enter update notes:");
     if (notes === null) return; // User cancelled
     notes = notes.trim();
+    if (!notes) return; // Empty notes, do nothing
     
     let r = await fetch('/pull_update', {
         method: "POST",
@@ -549,25 +555,13 @@ def api_route(action):
     if action == "pull_update":
         try:
             notes = d.get("notes", "").strip()
+            if notes:
+                with open(NOTES_F, "w", encoding="utf-8") as nf:
+                    nf.write(notes)
+
             subprocess.run(["git", "pull", "origin", "main"], check=True)
             subprocess.run(["pip3", "install", "-r", "requirements.txt", "--break-system-packages"], check=True)
             
-            if notes:
-                webhook_url = os.getenv("UPDATE_WEBHOOK_URL")
-                if webhook_url:
-                    embed_payload = {
-                        "embeds": [{
-                            "title": "Goober System Update",
-                            "description": notes,
-                            "color": 0x89b4fa,
-                            "footer": {"text": "Updated via Dashboard Control Center"}
-                        }]
-                    }
-                    try:
-                        requests.post(webhook_url, json=embed_payload, timeout=5)
-                    except Exception:
-                        pass
-
             def delayed_restart():
                 time.sleep(1)
                 os._exit(0)
