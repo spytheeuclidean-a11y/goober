@@ -1,4 +1,4 @@
-import discord, random, re, json, os, time, asyncio, threading, itertools, urllib.parse, io
+import discord, random, re, json, os, time, asyncio, threading, itertools, urllib.parse, io, requests
 from discord.ext import commands
 from flask import Flask, request, render_template_string, session, redirect, Response, jsonify
 from dotenv import load_dotenv
@@ -58,6 +58,13 @@ def get_pool(scope, cat_name, gid, global_set):
 @bot.event
 async def on_ready():
     print(f"Online as: {bot.user.name}")
+    webhook_url = os.getenv("UPDATE_WEBHOOK_URL")
+    if webhook_url:
+        try:
+            requests.post(webhook_url, json={"content": "Goober has successfully updated and restarted online."}, timeout=5)
+        except Exception:
+            pass
+
     async def rot():
         while not bot.is_closed():
             if statuses: await bot.change_presence(activity=discord.Game(next(status_cycle)))
@@ -111,19 +118,18 @@ async def on_message(msg):
 
 # --- DISCORD COMMANDS ---
 @bot.command()
-async def commands(ctx):
-    help_text = (
-        "Available Commands:\n"
-        "!commands - Shows this list of commands.\n"
-        "!goob [prompt] - Generates an AI image based on your prompt.\n"
-        "!meme [text] - Creates a custom meme using learned media and text.\n"
-        "!readhistory [limit] - Scans past messages in the channel to absorb words and media.\n"
-        "!set_meme_channel [#channel] - Restricts meme generation to a specific channel (Admin).\n"
-        "!wipe_memory - Completely deletes all learned data across the bot (Admin).\n"
-        "!clear_mem [words/emojis/media] - Clears a specific memory category for this server (Admin).\n"
-        "!set_chance [1-100] - Changes the bot response probability percentage (Admin)."
-    )
-    await ctx.send(help_text)
+async def ghelp(ctx):
+    embed = discord.Embed(title="Goober Command Reference", color=0x89b4fa)
+    embed.add_field(name="!ghelp", value="Shows this command reference embed.", inline=False)
+    embed.add_field(name="!goob [prompt]", value="Generates an AI image based on your prompt.", inline=False)
+    embed.add_field(name="!meme [text]", value="Creates a custom meme using learned media and top/bottom text separated by a vertical bar.", inline=False)
+    embed.add_field(name="!readhistory [limit]", value="Scans past messages in the channel to absorb words, emojis, and media.", inline=False)
+    embed.add_field(name="!set_meme_channel [#channel]", value="Restricts meme generation to a specific text channel (Admin).", inline=False)
+    embed.add_field(name="!wipe_memory", value="Completely deletes all learned data across the bot brain (Admin).", inline=False)
+    embed.add_field(name="!clear_mem [words/emojis/media]", value="Clears a specific memory category for this server (Admin).", inline=False)
+    embed.add_field(name="!set_chance [1-100]", value="Changes the bot response probability percentage for this server (Admin).", inline=False)
+    embed.add_field(name="Dashboard Features", value="Memory Injector, Cross-Server Dictionaries, Broadcast Messaging, System Health Monitor, Leaderboards, and Custom Statuses are fully controllable via the web dashboard.", inline=False)
+    await ctx.send(embed=embed)
 
 @bot.command()
 @commands.has_permissions(administrator=True)
